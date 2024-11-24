@@ -1,140 +1,189 @@
-using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.AspNetCore.Http.Metadata;
-using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Reflection;
-using System.Reflection.Metadata;
-using System.Security.Cryptography;
-using System.Xml.Linq;
 
 var builder = WebApplication.CreateBuilder(args);
 
 
-
-
+//Service Registration
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 
+builder.Services.AddSingleton<ISoftwareDeveloperRepository, SoftwareDeveloperRepository>();
+builder.Services.AddScoped<ISoftwareDeveloperService, SoftwareDeveloperService>();
+
 var app = builder.Build();
+//Middleware Registration Starts
 
 
 
-//1.Route Parameters
-app.MapGet("/developers/{id:int}", (int id) =>
+#region EndPoints
+app.MapGet("/developers", async (ISoftwareDeveloperService service, CancellationToken cancellationToken) =>
 {
-    return TypedResults.Ok($"Fetching developer with ID: {id}");
+    var developers = await service.GetAllAsync(cancellationToken);
+    return TypedResults.Ok(developers);
 });
 
-
-//2.Query String Parameters
-app.MapGet("/developers/search", ([FromQuery(Name = "developerName")] string? name) =>
-{
-    if (string.IsNullOrWhiteSpace(name))
-        return Results.NotFound();
-    return TypedResults.Ok(new { message = "Searching developer with name: {name}" });
-});
-
-//3. Header Parameters
-app.MapGet("/developers/validate", ([FromHeader(Name = "X-API-Key")] string apiKey) =>
-{
-    if (string.IsNullOrWhiteSpace(apiKey) || apiKey != "12345")
-    {
-        return Results.Unauthorized();
-    }
-    return Results.Ok(new { Authorization = apiKey });
-});
-
-//4.Body Parameters
-app.MapPost("/developers", (SoftwareDeveloper developer) =>
-{
-    return TypedResults.Ok($"Received developer: {developer.Name}, Specialization: {developer.Specialization}");
-});
-
-
-//5. FromBody
-app.MapPost("/developer", ([FromBody] SoftwareDeveloper dev) =>
-{
-    var name = dev.Name;
-    var specialization = dev.Specialization;
-
-    return TypedResults.Ok($"Received developer: {name}, Specialization: {specialization}");
-});
-
-
-//6.Form Parameters
-app.MapPost("/developers/upload", async (HttpContext context) =>
-{
-    var form = await context.Request.ReadFormAsync();
-    var name = form["name"].ToString();
-    var specialization = form["specialization"].ToString();
-
-    return TypedResults.Ok($"Received developer: {name}, Specialization: {specialization}");
-});
-
-
-//7.Services Injection
-app.MapGet("/developers/service", (ILogger<Program> logger) =>
-{
-    logger.LogInformation("Service-based handler invoked.");
-    return TypedResults.Ok("Service injection is working!");
-});
-
-//8.From Services
-app.MapGet("/developers/fromservices", ([FromServices] DeveloperService DevService) =>
-{
-    var welcome = DevService.GiveWelcomePackage();
-    return TypedResults.Ok($"welcome package means : {welcome}");
-});
-
-
-//9.Raw HttpContext
-app.MapGet("/developers/raw", (HttpContext context) =>
-{
-    var requestMethod = context.Request.Method;
-    return TypedResults.Ok($"Request Method: {requestMethod}");
-});
-
-
-
-
-
-app.MapGet("/{id}", ([FromRoute] int id,
-                     [FromQuery(Name = "p")] int page,
-                     [FromServices] DeveloperService service,
-                     [FromHeader(Name = "Content-Type")] string contentType)
-                     => {
-
-                     }
+app.MapGet("/developers/{id:int}", async (int id, ISoftwareDeveloperService service, CancellationToken cancellationToken) =>
+    await Task.FromResult<Results<Ok<SoftwareDeveloper>, NotFound<string>>>(await service.GetByIdAsync(id, cancellationToken) is SoftwareDeveloper developer
+        ? TypedResults.Ok(developer)
+        : TypedResults.NotFound($"Developer with ID {id} not found."))
 );
+
+app.MapPost("/developers", async (SoftwareDeveloper developer, ISoftwareDeveloperService service, CancellationToken cancellationToken) =>
+{
+    var addedDeveloper = await service.AddAsync(developer, cancellationToken);
+    return TypedResults.Created($"/developers/{addedDeveloper.Id}", addedDeveloper);
+});
+
+app.MapPut("/developers/{id:int}", async (int id, SoftwareDeveloper developer, ISoftwareDeveloperService service, CancellationToken cancellationToken) =>
+{
+    if (id != developer.Id)
+    {
+        return Results.BadRequest("ID in route does not match ID in body.");
+    }
+
+    var updatedDeveloper = await service.UpdateAsync(developer, cancellationToken);
+    return updatedDeveloper == null
+        ? TypedResults.NotFound($"Developer with ID {id} not found.")
+        : TypedResults.Ok(updatedDeveloper);
+});
+
+app.MapDelete("/developers/{id:int}", async (int id, ISoftwareDeveloperService service, CancellationToken cancellationToken) =>
+{
+    var success = await service.DeleteAsync(id, cancellationToken);
+    return success
+        ? TypedResults.Ok(true)
+        : TypedResults.Ok(false);
+});
+#endregion
+
+
+
+
+
 
 
 app.UseSwagger();
 app.UseSwaggerUI();
 
-
+//Middleware Registration Stops
 app.Run();
 
 
-
-
-
-public class DeveloperService
-{
-    public string GiveWelcomePackage()
-    {
-        return "Laptop and so many other things...";
-    }
-}
+#region Entity
 public class SoftwareDeveloper
 {
     public int Id { get; set; }
-    public string Name { get; set; }
-    public int Experience { get; set; }
+    public string? Name { get; set; }
     public string? Specialization { get; set; }
-
-
-
-
+    public int Experience { get; set; }
 }
+#endregion
+
+#region Abstraction
+public interface ISoftwareDeveloperRepository
+{
+    Task<IEnumerable<SoftwareDeveloper>> GetAllAsync(CancellationToken cancellationToken);
+    Task<SoftwareDeveloper?> GetByIdAsync(int id, CancellationToken cancellationToken);
+    Task<SoftwareDeveloper> AddAsync(SoftwareDeveloper developer, CancellationToken cancellationToken);
+    Task<SoftwareDeveloper?> UpdateAsync(SoftwareDeveloper developer, CancellationToken cancellationToken);
+    Task<bool> DeleteAsync(int id, CancellationToken cancellationToken);
+}
+
+
+public interface ISoftwareDeveloperService
+{
+    Task<IEnumerable<SoftwareDeveloper>> GetAllAsync(CancellationToken cancellationToken);
+    Task<SoftwareDeveloper?> GetByIdAsync(int id, CancellationToken cancellationToken);
+    Task<SoftwareDeveloper> AddAsync(SoftwareDeveloper developer, CancellationToken cancellationToken);
+    Task<SoftwareDeveloper?> UpdateAsync(SoftwareDeveloper developer, CancellationToken cancellationToken);
+    Task<bool> DeleteAsync(int id, CancellationToken cancellationToken);
+}
+
+#endregion
+
+
+#region Implementation
+
+public class SoftwareDeveloperRepository : ISoftwareDeveloperRepository
+{
+    private readonly List<SoftwareDeveloper> _developers = new()
+    {
+        new SoftwareDeveloper { Id = 1, Name = "Ali", Specialization = "Backend", Experience = 5 },
+        new SoftwareDeveloper { Id = 2, Name = "Reza", Specialization = "Frontend", Experience = 3 }
+    };
+
+    public async Task<IEnumerable<SoftwareDeveloper>> GetAllAsync(CancellationToken cancellationToken)
+    {
+        await Task.Delay(1, cancellationToken); // Simulate async behavior
+        return _developers;
+    }
+
+    public async Task<SoftwareDeveloper?> GetByIdAsync(int id, CancellationToken cancellationToken)
+    {
+        await Task.Delay(1, cancellationToken); // Simulate async behavior
+        return _developers.FirstOrDefault(d => d.Id == id);
+    }
+
+    public async Task<SoftwareDeveloper> AddAsync(SoftwareDeveloper developer, CancellationToken cancellationToken)
+    {
+        await Task.Delay(1, cancellationToken); // Simulate async behavior
+        developer.Id = _developers.Any() ? _developers.Max(d => d.Id) + 1 : 1;
+        _developers.Add(developer);
+        return developer;
+    }
+
+    public async Task<SoftwareDeveloper?> UpdateAsync(SoftwareDeveloper developer, CancellationToken cancellationToken)
+    {
+        await Task.Delay(1, cancellationToken); // Simulate async behavior
+        var existing = _developers.FirstOrDefault(d => d.Id == developer.Id);
+        if (existing == null) return null;
+
+        existing.Name = developer.Name;
+        existing.Specialization = developer.Specialization;
+        existing.Experience = developer.Experience;
+
+        return existing;
+    }
+
+    public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken)
+    {
+        await Task.Delay(1, cancellationToken); // Simulate async behavior
+        var developer = _developers.FirstOrDefault(d => d.Id == id);
+        if (developer == null) return false;
+
+        _developers.Remove(developer);
+        return true;
+    }
+}
+
+
+//
+
+public class SoftwareDeveloperService : ISoftwareDeveloperService
+{
+    private readonly ISoftwareDeveloperRepository _repository;
+
+    public SoftwareDeveloperService(ISoftwareDeveloperRepository repository)
+    {
+        _repository = repository;
+    }
+
+    public Task<IEnumerable<SoftwareDeveloper>> GetAllAsync(CancellationToken cancellationToken) =>
+        _repository.GetAllAsync(cancellationToken);
+
+    public Task<SoftwareDeveloper?> GetByIdAsync(int id, CancellationToken cancellationToken) =>
+        _repository.GetByIdAsync(id, cancellationToken);
+
+    public Task<SoftwareDeveloper> AddAsync(SoftwareDeveloper developer, CancellationToken cancellationToken) =>
+        _repository.AddAsync(developer, cancellationToken);
+
+    public Task<SoftwareDeveloper?> UpdateAsync(SoftwareDeveloper developer, CancellationToken cancellationToken) =>
+        _repository.UpdateAsync(developer, cancellationToken);
+
+    public Task<bool> DeleteAsync(int id, CancellationToken cancellationToken) =>
+        _repository.DeleteAsync(id, cancellationToken);
+}
+
+
+#endregion
