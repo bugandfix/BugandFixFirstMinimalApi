@@ -1,89 +1,140 @@
-
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Security.Cryptography;
+using System.Xml.Linq;
 
 var builder = WebApplication.CreateBuilder(args);
+
+
+
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+
 var app = builder.Build();
 
 
-//app.MapGet("/hello", () => "Hello named route")
-//   .WithName("hi");
 
-//app.MapGet("/", (LinkGenerator linker) =>
-//        $"The link to the hello route is {linker.GetPathByName("hi", values: null)}");
+//1.Route Parameters
+app.MapGet("/developers/{id:int}", (int id) =>
+{
+    return TypedResults.Ok($"Fetching developer with ID: {id}");
+});
 
 
-//StudentEndpoints.Map(app);
+//2.Query String Parameters
+app.MapGet("/developers/search", ([FromQuery(Name = "developerName")] string? name) =>
+{
+    if (string.IsNullOrWhiteSpace(name))
+        return Results.NotFound();
+    return TypedResults.Ok(new { message = "Searching developer with name: {name}" });
+});
 
-app.MapGroup("/api/students")
-      .MapStudentsApi()
-      .WithTags("Student Api");
+//3. Header Parameters
+app.MapGet("/developers/validate", ([FromHeader(Name = "X-API-Key")] string apiKey) =>
+{
+    if (string.IsNullOrWhiteSpace(apiKey) || apiKey != "12345")
+    {
+        return Results.Unauthorized();
+    }
+    return Results.Ok(new { Authorization = apiKey });
+});
 
+//4.Body Parameters
+app.MapPost("/developers", (SoftwareDeveloper developer) =>
+{
+    return TypedResults.Ok($"Received developer: {developer.Name}, Specialization: {developer.Specialization}");
+});
+
+
+//5. FromBody
+app.MapPost("/developer", ([FromBody] SoftwareDeveloper dev) =>
+{
+    var name = dev.Name;
+    var specialization = dev.Specialization;
+
+    return TypedResults.Ok($"Received developer: {name}, Specialization: {specialization}");
+});
+
+
+//6.Form Parameters
+app.MapPost("/developers/upload", async (HttpContext context) =>
+{
+    var form = await context.Request.ReadFormAsync();
+    var name = form["name"].ToString();
+    var specialization = form["specialization"].ToString();
+
+    return TypedResults.Ok($"Received developer: {name}, Specialization: {specialization}");
+});
+
+
+//7.Services Injection
+app.MapGet("/developers/service", (ILogger<Program> logger) =>
+{
+    logger.LogInformation("Service-based handler invoked.");
+    return TypedResults.Ok("Service injection is working!");
+});
+
+//8.From Services
+app.MapGet("/developers/fromservices", ([FromServices] DeveloperService DevService) =>
+{
+    var welcome = DevService.GiveWelcomePackage();
+    return TypedResults.Ok($"welcome package means : {welcome}");
+});
+
+
+//9.Raw HttpContext
+app.MapGet("/developers/raw", (HttpContext context) =>
+{
+    var requestMethod = context.Request.Method;
+    return TypedResults.Ok($"Request Method: {requestMethod}");
+});
+
+
+
+
+
+app.MapGet("/{id}", ([FromRoute] int id,
+                     [FromQuery(Name = "p")] int page,
+                     [FromServices] DeveloperService service,
+                     [FromHeader(Name = "Content-Type")] string contentType)
+                     => {
+
+                     }
+);
+
+
+app.UseSwagger();
+app.UseSwaggerUI();
 
 
 app.Run();
 
 
-public static class RouteBuilderExtension
+
+
+
+public class DeveloperService
 {
-    public static RouteGroupBuilder MapStudentsApi(this RouteGroupBuilder group)
+    public string GiveWelcomePackage()
     {
-        group.MapGet("/", async context =>
-        {
-            // Get all Students
-            await context.Response.WriteAsJsonAsync(new { Message = "All Students...." });
-        });
-
-
-        group.MapPost("/", async context =>
-        {
-            // Get one Student 
-            await context.Response.WriteAsJsonAsync(new { Message = "The Student After Insert" });
-        });
-
-        group.MapPut("/", async context =>
-        {
-            // Update one Student
-            await context.Response.WriteAsJsonAsync(new { Message = "The Student After Update" });
-        });
-
-        group.MapDelete("/", async context =>
-        {
-            // Delete one Student
-            await context.Response.WriteAsJsonAsync(new { Message = "Message After Delete" });
-        });
-
-        return group;
+        return "Laptop and so many other things...";
     }
 }
-
-
-public static class StudentEndpoints
+public class SoftwareDeveloper
 {
-    public static void Map(WebApplication app)
-    {
-        app.MapGet("/", async context =>
-        {
-            // Get all Students
-            await context.Response.WriteAsJsonAsync(new { Message = "All Students...." });
-        });
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public int Experience { get; set; }
+    public string? Specialization { get; set; }
 
 
-        app.MapPost("/", async context =>
-        {
-            // Get one Student 
-            await context.Response.WriteAsJsonAsync(new { Message = "The Student After Insert" });
-        });
 
-        app.MapPut("/", async context =>
-        {
-            // Update one Student
-            await context.Response.WriteAsJsonAsync(new { Message = "The Student After Update" });
-        });
 
-        app.MapDelete("/", async context =>
-        {
-            // Delete one Student
-            await context.Response.WriteAsJsonAsync(new { Message = "Message After Delete" });
-        });
-
-    }
 }
