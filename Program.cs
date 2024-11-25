@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http.HttpResults;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,6 +56,19 @@ app.MapDelete("/developers/{id:int}", async (int id, ISoftwareDeveloperService s
         ? TypedResults.Ok(true)
         : TypedResults.Ok(false);
 });
+
+app.MapGet("/custombinding/{id:int}", (SoftwareDeveloper? developer) =>
+{
+    if (developer == null)
+    {
+        return Results.NotFound("Developer not found.");
+    }
+
+    return Results.Ok(developer);
+});
+
+
+
 #endregion
 
 
@@ -76,7 +90,35 @@ public class SoftwareDeveloper
     public int Id { get; set; }
     public string? Name { get; set; }
     public string? Specialization { get; set; }
+    public string? Title { get; set; } = "Unknown";
     public int Experience { get; set; }
+
+
+    public static ValueTask<SoftwareDeveloper?> BindAsync(HttpContext context, ParameterInfo parameter)
+    {
+        // Extract ID from route values
+        var idString = context.Request.RouteValues["id"]?.ToString();
+        if (idString == null || !int.TryParse(idString, out var id))
+        {
+            // Return a null ValueTask if ID is invalid
+            return ValueTask.FromResult<SoftwareDeveloper?>(null);
+        }
+
+        // Simulate fetching data from a database or another source
+        var developers = new List<SoftwareDeveloper>
+        {
+            new SoftwareDeveloper { Id = 1, Name = "Ali",  Specialization = "Backend", Experience = 10 },
+            new SoftwareDeveloper { Id = 2, Name = "Reza", Specialization = "Frontend", Experience = 3 },
+            new SoftwareDeveloper { Id = 3, Name = "Hamid",Specialization = "Frontend", Experience = 12 }
+        };
+
+        // Simulate an asynchronous delay
+        var developer = developers.FirstOrDefault(d => d.Id == id);
+        if (developer is not null)
+            developer.Title = (developer.Experience > 10) ? "Senior" : "Junior";
+        return ValueTask.FromResult<SoftwareDeveloper?>(developer);
+    }
+
 }
 #endregion
 
