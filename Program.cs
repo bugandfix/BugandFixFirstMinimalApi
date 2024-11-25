@@ -12,6 +12,8 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddSingleton<ISoftwareDeveloperRepository, SoftwareDeveloperRepository>();
 builder.Services.AddScoped<ISoftwareDeveloperService, SoftwareDeveloperService>();
 
+builder.Services.AddControllers(); // Enable controller support
+
 var app = builder.Build();
 //Middleware Registration Starts
 
@@ -71,7 +73,7 @@ app.MapGet("/custombinding/{id:int}", (SoftwareDeveloper? developer) =>
 
 #endregion
 
-
+app.MapControllers(); // Map routes from controllers
 
 
 
